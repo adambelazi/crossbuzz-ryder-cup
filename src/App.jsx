@@ -762,7 +762,7 @@ function MatchesTab({ day, format, state, update, canScore, canAdmin }) {
   if (state.players.length < 2) return <EmptyNote>Add players in the Roster tab first.</EmptyNote>;
   return (
     <div>
-      <SectionTitle>{format === "fourball" ? "Day 1 — Fourball (2 v 2)" : "Day 2 — Singles"}</SectionTitle>
+      <SectionTitle>{day === 1 ? "Day 1 — Fourballs & Singles" : "Day 2 — Singles"}</SectionTitle>
       {dayMatches.length > 0 && (
         <div style={{ fontSize: 11, color: "#8a9a8f", border: "1px dashed #2a4636", borderRadius: 8, padding: "8px 10px", marginBottom: 12, lineHeight: 1.5 }}>
           <b style={{ color: "#D9C7A0" }}>How to enter scores:</b> put in your actual shots taken (your gross score) — the app works out strokes given automatically.
@@ -780,7 +780,7 @@ function MatchesTab({ day, format, state, update, canScore, canAdmin }) {
       {canAdmin && (creating ? (
         <NewMatchForm state={state} format={format} onCreate={createMatch} onCancel={() => setCreating(false)} />
       ) : (
-        <button onClick={() => setCreating(true)} style={primaryBtn({ width: "100%", marginTop: 10 })}>+ New {format === "fourball" ? "fourball" : "singles"} match</button>
+        <button onClick={() => setCreating(true)} style={primaryBtn({ width: "100%", marginTop: 10 })}>+ New match</button>
       ))}
       {!canAdmin && dayMatches.length === 0 && <EmptyNote>The admin hasn't set up any matches for this day yet.</EmptyNote>}
     </div>
@@ -788,13 +788,20 @@ function MatchesTab({ day, format, state, update, canScore, canAdmin }) {
 }
 
 function NewMatchForm({ state, format, onCreate, onCancel, initial, submitLabel }) {
-  const perSide = format === "fourball" ? 2 : 1;
+  const [fmt, setFmt] = useState(initial ? (initial.format || format) : format);
+  const perSide = fmt === "fourball" ? 2 : 1;
   const [courseKey, setCourseKey] = useState(initial ? initial.course : "OTM");
   const [usaSel, setUsaSel] = useState(initial ? initial.usa : []);
   const [eurSel, setEurSel] = useState(initial ? initial.eur : []);
   const [points, setPoints] = useState(initial && initial.points != null ? String(initial.points) : "1");
   const usaPlayers = state.players.filter((p) => p.team === "USA");
   const eurPlayers = state.players.filter((p) => p.team === "EUR");
+  const changeFmt = (f) => {
+    setFmt(f);
+    const n = f === "fourball" ? 2 : 1;
+    setUsaSel((s) => s.slice(0, n));
+    setEurSel((s) => s.slice(0, n));
+  };
   const toggle = (list, setList, id) => {
     if (list.includes(id)) setList(list.filter((x) => x !== id));
     else if (list.length < perSide) setList([...list, id]);
@@ -802,6 +809,11 @@ function NewMatchForm({ state, format, onCreate, onCancel, initial, submitLabel 
   const ready = usaSel.length === perSide && eurSel.length === perSide && Number(points) > 0;
   return (
     <div style={{ border: "1px solid #2a4636", borderRadius: 10, padding: 14, marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: "#8a9a8f", marginBottom: 8 }}>Match type</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => changeFmt("fourball")} style={{ flex: 1, padding: "9px 8px", borderRadius: 8, border: fmt === "fourball" ? "1px solid #C7A252" : "1px solid #2a4636", background: fmt === "fourball" ? "#C7A25222" : "transparent", color: fmt === "fourball" ? "#F3EDDD" : "#8a9a8f", fontSize: 12, fontWeight: 600 }}>Fourball (2 v 2)</button>
+        <button onClick={() => changeFmt("singles")} style={{ flex: 1, padding: "9px 8px", borderRadius: 8, border: fmt === "singles" ? "1px solid #C7A252" : "1px solid #2a4636", background: fmt === "singles" ? "#C7A25222" : "transparent", color: fmt === "singles" ? "#F3EDDD" : "#8a9a8f", fontSize: 12, fontWeight: 600 }}>Singles (1 v 1)</button>
+      </div>
       <div style={{ fontSize: 12, color: "#8a9a8f", marginBottom: 8 }}>Course</div>
       <select value={courseKey} onChange={(e) => setCourseKey(e.target.value)} style={inputStyle({ width: "100%", marginBottom: 12 })}>
         {Object.entries(state.courses).map(([key, c]) => <option key={key} value={key}>{c.name}</option>)}
@@ -815,7 +827,7 @@ function NewMatchForm({ state, format, onCreate, onCancel, initial, submitLabel 
         <input type="number" step="0.5" min="0.5" value={points} onChange={(e) => setPoints(e.target.value)} style={inputStyle({ width: 80 })} />
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <button disabled={!ready} onClick={() => onCreate({ course: courseKey, usa: usaSel, eur: eurSel, points: Number(points) })} style={primaryBtn({ flex: 1, opacity: ready ? 1 : 0.4 })}>{submitLabel || "Create match"}</button>
+        <button disabled={!ready} onClick={() => onCreate({ course: courseKey, usa: usaSel, eur: eurSel, points: Number(points), format: fmt })} style={primaryBtn({ flex: 1, opacity: ready ? 1 : 0.4 })}>{submitLabel || "Create match"}</button>
         <button onClick={onCancel} style={ghostBtn({ flex: 1 })}>Cancel</button>
       </div>
     </div>
