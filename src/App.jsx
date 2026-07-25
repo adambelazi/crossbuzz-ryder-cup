@@ -703,6 +703,7 @@ function MatchesTab({ day, format, state, update, canScore, canAdmin }) {
   const dayMatches = state.matches.filter((m) => m.day === day);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const createMatch = (matchData) => {
     update((prev) => ({ ...prev, matches: [...prev.matches, { id: uid(), day, format, ...matchData, scores: {} }] }));
     setCreating(false);
@@ -760,21 +761,38 @@ function MatchesTab({ day, format, state, update, canScore, canAdmin }) {
     });
   };
   if (state.players.length < 2) return <EmptyNote>Add players in the Roster tab first.</EmptyNote>;
+
+  const selected = dayMatches.find((m) => m.id === selectedId);
+  if (selected && editingId !== selected.id) {
+    return (
+      <MatchView
+        match={selected}
+        state={state}
+        onScore={updateScore}
+        onConcede={updateConcede}
+        onUndo={() => undoLastHole(selected.id)}
+        onRemove={() => { removeMatch(selected.id); setSelectedId(null); }}
+        onEdit={() => setEditingId(selected.id)}
+        onBack={() => setSelectedId(null)}
+        canScore={canScore}
+        canAdmin={canAdmin}
+      />
+    );
+  }
+
   return (
     <div>
       <SectionTitle>{day === 1 ? "Day 1 — Fourballs & Singles" : "Day 2 — Singles"}</SectionTitle>
-      {dayMatches.length > 0 && (
+      {dayMatches.length > 0 && !editingId && (
         <div style={{ fontSize: 11, color: "#8a9a8f", border: "1px dashed #2a4636", borderRadius: 8, padding: "8px 10px", marginBottom: 12, lineHeight: 1.5 }}>
-          <b style={{ color: "#D9C7A0" }}>How to enter scores:</b> put in your actual shots taken (your gross score) — the app works out strokes given automatically.
-          {" "}<span style={{ color: "#C7A252" }}>●</span> under a score means that player gets a shot on that hole; net score shows underneath once entered.
-          If a hole isn't worth finishing (gimme, pick-up, no chance), use the <b>concede</b> buttons instead of guessing a score.
+          Tap a match to open it. Players: enter your actual shots taken (gross) — the app works out strokes given automatically. <span style={{ color: "#C7A252" }}>●</span> means a shot received on that hole. Use <b>concede</b> when a hole isn't worth finishing.
         </div>
       )}
       {dayMatches.map((m) => (
         editingId === m.id ? (
           <NewMatchForm key={m.id} state={state} format={format} initial={m} onCreate={(data) => saveEdit(m.id, data)} onCancel={() => setEditingId(null)} submitLabel="Save changes" />
         ) : (
-          <MatchCard key={m.id} match={m} state={state} onScore={updateScore} onConcede={updateConcede} onUndo={() => undoLastHole(m.id)} onRemove={() => removeMatch(m.id)} onEdit={() => setEditingId(m.id)} canScore={canScore} canAdmin={canAdmin} />
+          <MatchSummaryCard key={m.id} match={m} state={state} onOpen={() => setSelectedId(m.id)} />
         )
       ))}
       {canAdmin && (creating ? (
@@ -849,8 +867,7 @@ function PlayerPicker({ meta, players, selected, onToggle }) {
   );
 }
 
-function MatchCard({ match, state, onScore, onConcede, onUndo, onRemove, onEdit, canScore, canAdmin }) {
-  const [unlocked, setUnlocked] = useState(false);
+function analyzeMatch(match, state) {
   const course = state.courses[match.course];
   const usaP = match.usa.map((id) => state.players.find((p) => p.id === id)).filter(Boolean);
   const eurP = match.eur.map((id) => state.players.find((p) => p.id === id)).filter(Boolean);
@@ -885,10 +902,6 @@ function MatchCard({ match, state, onScore, onConcede, onUndo, onRemove, onEdit,
   const usaLabel = usaP.map((p) => p.name.split(" ")[0]).join("/");
   const eurLabel = eurP.map((p) => p.name.split(" ")[0]).join("/");
   const statusLabel = holesPlayed === 0 ? "Not started" : matchStatusLabel(diff, holesPlayed, holesLeft, usaLabel, eurLabel);
-  const locked = finished && !unlocked;
-  const inputsEnabled = canScore && !locked;
-
-  // Momentum: streak of consecutive holes won by the same side (halves and gaps break it)
   let streakSide = null, streakLen = 0;
   holeRows.forEach((row) => {
     if (row.winner === "usa" || row.winner === "eur") {
@@ -897,110 +910,166 @@ function MatchCard({ match, state, onScore, onConcede, onUndo, onRemove, onEdit,
     } else if (row.winner === "halved") {
       streakSide = null; streakLen = 0;
     }
-    // unplayed holes (winner === null) don't reset — they just haven't happened yet
   });
   const hotSide = streakLen >= 3 ? streakSide : null;
   const coldSide = hotSide ? (hotSide === "usa" ? "eur" : "usa") : null;
+  return { course, usaP, eurP, points, holeRows, diff, holesPlayed, holesLeft, finished, statusLabel, hotSide, coldSide, streakLen };
+}
+
+function MatchSummaryCard({ match, state, onOpen }) {
+  const a = analyzeMatch(match, state);
+  return (
+    <button onClick={onOpen} style={{ display: "block", width: "100%", textAlign: "left", background: "#17301F", border: "1px solid #2a4636", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 13 }}>
+          <span style={{ color: TEAM_META.USA.color, fontWeight: 700 }}>{a.usaP.map((p) => p.name).join(" & ")} {a.hotSide === "usa" && "🔥"}{a.coldSide === "usa" && "🧊"}</span>
+          <span style={{ color: "#6b7a70" }}> vs </span>
+          <span style={{ color: TEAM_META.EUR.color, fontWeight: 700 }}>{a.eurP.map((p) => p.name).join(" & ")} {a.hotSide === "eur" && "🔥"}{a.coldSide === "eur" && "🧊"}</span>
+          <div style={{ color: "#6b7a70", fontSize: 11, marginTop: 3 }}>{a.course.name} · worth {a.points === 1 ? "1 pt" : `${a.points} pts`}{a.holesPlayed > 0 && !a.finished ? ` · thru ${a.holesPlayed}` : ""}</div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: a.finished ? "#C7A252" : "#D9C7A0" }}>{a.statusLabel}</div>
+          <div style={{ fontSize: 11, color: "#C7A252", marginTop: 3 }}>Open ›</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function MatchView({ match, state, onScore, onConcede, onUndo, onRemove, onEdit, onBack, canScore, canAdmin }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const a = analyzeMatch(match, state);
+  const locked = a.finished && !unlocked;
+  const inputsEnabled = canScore && !locked;
+  const firstOpen = a.holeRows.findIndex((r) => r.winner == null);
+  const defaultIdx = firstOpen === -1 ? 17 : firstOpen;
+  const [holeIdx, setHoleIdx] = useState(defaultIdx);
+  const [mode, setMode] = useState(inputsEnabled ? "entry" : "card");
+  const row = a.holeRows[holeIdx];
+  const h = row.hole;
+
+  const banner = row.winner === "usa" ? { bg: "#5c1420", color: "#f0b3bc", text: `${TEAM_META.USA.flag} USA win the hole${row.concede ? " (conceded)" : ""}` }
+    : row.winner === "eur" ? { bg: "#12324c", color: "#9fc0e8", text: `${TEAM_META.EUR.flag} Europe win the hole${row.concede ? " (conceded)" : ""}` }
+    : row.winner === "halved" ? { bg: "#3d3319", color: "#e8d5a4", text: "🤝 Halved" }
+    : null;
 
   return (
-    <div style={{ border: "1px solid #2a4636", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#17301F" }}>
-        <div style={{ fontSize: 12 }}>
-          <span style={{ color: TEAM_META.USA.color, fontWeight: 700 }}>
-            {usaP.map((p) => p.name).join(" & ")} {hotSide === "usa" && "🔥"}{coldSide === "usa" && "🧊"}
-          </span>
-          <span style={{ color: "#6b7a70" }}> vs </span>
-          <span style={{ color: TEAM_META.EUR.color, fontWeight: 700 }}>
-            {eurP.map((p) => p.name).join(" & ")} {hotSide === "eur" && "🔥"}{coldSide === "eur" && "🧊"}
-          </span>
-          <div style={{ color: "#6b7a70", fontSize: 11, marginTop: 2 }}>{course.name} · worth {points === 1 ? "1 pt" : `${points} pts`}</div>
-          {hotSide && (
-            <div style={{ fontSize: 11, color: "#C7A252", marginTop: 3, fontWeight: 600 }}>
-              {streakLen} in a row — {hotSide === "usa" ? usaP.map((p) => p.name).join(" & ") : eurP.map((p) => p.name).join(" & ")} on fire
+    <div>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: "#C7A252", fontSize: 13, fontWeight: 600, padding: "0 0 12px" }}>‹ All matches</button>
+      <div style={{ border: "1px solid #2a4636", borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+        <div style={{ padding: "12px 14px", background: "#17301F" }}>
+          <div style={{ fontSize: 13 }}>
+            <span style={{ color: TEAM_META.USA.color, fontWeight: 700 }}>{a.usaP.map((p) => p.name).join(" & ")} {a.hotSide === "usa" && "🔥"}{a.coldSide === "usa" && "🧊"}</span>
+            <span style={{ color: "#6b7a70" }}> vs </span>
+            <span style={{ color: TEAM_META.EUR.color, fontWeight: 700 }}>{a.eurP.map((p) => p.name).join(" & ")} {a.hotSide === "eur" && "🔥"}{a.coldSide === "eur" && "🧊"}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+            <div style={{ color: "#6b7a70", fontSize: 11 }}>{a.course.name} · worth {a.points === 1 ? "1 pt" : `${a.points} pts`}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: a.finished ? "#C7A252" : "#D9C7A0" }}>{a.statusLabel}{a.holesPlayed > 0 && !a.finished ? ` thru ${a.holesPlayed}` : ""}</div>
+          </div>
+          {a.hotSide && (
+            <div style={{ fontSize: 11, color: "#C7A252", marginTop: 4, fontWeight: 600 }}>
+              {a.streakLen} in a row — {a.hotSide === "usa" ? a.usaP.map((p) => p.name).join(" & ") : a.eurP.map((p) => p.name).join(" & ")} on fire
             </div>
           )}
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: finished ? "#C7A252" : "#D9C7A0" }}>{statusLabel}</div>
-          {finished && <div style={{ fontSize: 10, color: "#8a9a8f", marginTop: 1 }}>{locked ? "🔒 locked" : "✏️ editing"}</div>}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4, flexWrap: "wrap" }}>
-            {canScore && (holesPlayed > 0) && <button onClick={onUndo} style={{ background: "none", border: "none", color: "#8a9a8f", fontSize: 11 }}>undo last</button>}
-            {finished && canScore && <button onClick={() => setUnlocked((u) => !u)} style={{ background: "none", border: "none", color: "#C7A252", fontSize: 11 }}>{locked ? "unlock" : "lock"}</button>}
-            {canAdmin && <button onClick={onEdit} style={{ background: "none", border: "none", color: "#8a9a8f", fontSize: 11 }}>edit</button>}
+          <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+            {canScore && a.holesPlayed > 0 && <button onClick={onUndo} style={{ background: "none", border: "none", color: "#8a9a8f", fontSize: 11 }}>undo last hole</button>}
+            {a.finished && canScore && <button onClick={() => setUnlocked((u) => !u)} style={{ background: "none", border: "none", color: "#C7A252", fontSize: 11 }}>{locked ? "🔒 unlock to edit" : "✏️ lock"}</button>}
+            {canAdmin && <button onClick={onEdit} style={{ background: "none", border: "none", color: "#8a9a8f", fontSize: 11 }}>edit match</button>}
             {canAdmin && <button onClick={onRemove} style={{ background: "none", border: "none", color: "#8a5555", fontSize: 11 }}>remove</button>}
           </div>
         </div>
+        <div style={{ display: "flex", borderTop: "1px solid #2a4636" }}>
+          <button onClick={() => setMode("entry")} style={{ flex: 1, padding: "11px 8px", background: mode === "entry" ? "#1e3d2c" : "transparent", color: mode === "entry" ? "#F3EDDD" : "#8a9a8f", border: "none", borderBottom: mode === "entry" ? "2px solid #C7A252" : "2px solid transparent", fontSize: 13, fontWeight: 600 }}>{inputsEnabled ? "Enter scores" : "Hole by hole"}</button>
+          <button onClick={() => setMode("card")} style={{ flex: 1, padding: "11px 8px", background: mode === "card" ? "#1e3d2c" : "transparent", color: mode === "card" ? "#F3EDDD" : "#8a9a8f", border: "none", borderBottom: mode === "card" ? "2px solid #C7A252" : "2px solid transparent", fontSize: 13, fontWeight: 600 }}>Scorecard</button>
+        </div>
       </div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ fontSize: 11 }}>
-          <thead>
-            <tr style={{ color: "#6b7a70" }}>
-              <th style={thStyle}>H</th><th style={thStyle}>Par</th>
-              {usaP.map((p, i) => <th key={i} style={{ ...thStyle, color: TEAM_META.USA.color }}>{p.name.split(" ")[0]}</th>)}
-              {eurP.map((p, i) => <th key={i} style={{ ...thStyle, color: TEAM_META.EUR.color }}>{p.name.split(" ")[0]}</th>)}
-              <th style={thStyle}>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {holeRows.map((row) => (
-              <tr key={row.hole.hole} style={{ borderTop: "1px solid #2a463655", background: row.winner ? `${row.winner === "usa" ? TEAM_META.USA.color : row.winner === "eur" ? TEAM_META.EUR.color : "#C7A252"}18` : "transparent" }}>
-                <td style={tdStyle}>{row.hole.hole}</td>
-                <td style={{ ...tdStyle, color: "#6b7a70" }}>{row.hole.par}</td>
-                {usaP.map((p, i) => (
-                  <td key={i} style={tdStyle}>
-                    <ScoreCell gross={row.usaGross[i]} strokes={row.usaStrokes[i]} enabled={inputsEnabled} onChange={(v) => onScore(match.id, row.hole.hole, `usa${i}`, v)} />
-                  </td>
-                ))}
-                {eurP.map((p, i) => (
-                  <td key={i} style={tdStyle}>
-                    <ScoreCell gross={row.eurGross[i]} strokes={row.eurStrokes[i]} enabled={inputsEnabled} onChange={(v) => onScore(match.id, row.hole.hole, `eur${i}`, v)} />
-                  </td>
-                ))}
-                <td style={{ ...tdStyle, fontWeight: 700, fontSize: 10, minWidth: row.winner ? "auto" : 70 }}>
-                  {row.concede ? (
-                    <div>
-                      <div style={{ color: row.winner === "usa" ? TEAM_META.USA.color : TEAM_META.EUR.color }}>{row.winner === "usa" ? "USA" : "EUR"} (conceded)</div>
-                      {canScore && !locked && <button onClick={() => onConcede(match.id, row.hole.hole, row.concede)} style={{ fontSize: 9, background: "none", border: "none", color: "#8a9a8f" }}>undo</button>}
-                    </div>
-                  ) : row.winner === "usa" ? (
-                    <span style={{ color: TEAM_META.USA.color }}>USA won</span>
-                  ) : row.winner === "eur" ? (
-                    <span style={{ color: TEAM_META.EUR.color }}>EUR won</span>
-                  ) : row.winner === "halved" ? (
-                    <span style={{ color: "#C7A252" }}>HALVED</span>
-                  ) : inputsEnabled ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <button onClick={() => onConcede(match.id, row.hole.hole, "usa")} style={{ fontSize: 8, background: "none", border: "1px solid #3a5a44", borderRadius: 4, color: "#8a9a8f", padding: "1px 3px" }}>USA concede</button>
-                      <button onClick={() => onConcede(match.id, row.hole.hole, "eur")} style={{ fontSize: 8, background: "none", border: "1px solid #3a5a44", borderRadius: 4, color: "#8a9a8f", padding: "1px 3px" }}>EUR concede</button>
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
+
+      {mode === "entry" && (
+        <div style={{ border: "1px solid #2a4636", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#17301F" }}>
+            <button onClick={() => setHoleIdx((i) => Math.max(0, i - 1))} disabled={holeIdx === 0} style={{ background: "none", border: "1px solid #3a5a44", borderRadius: 8, color: holeIdx === 0 ? "#3a5a44" : "#D9C7A0", fontSize: 16, padding: "8px 16px", fontWeight: 700 }}>‹</button>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#F3EDDD" }}>Hole {h.hole}</div>
+              <div style={{ fontSize: 11, color: "#8a9a8f", marginTop: 2 }}>Par {h.par} · SI {h.si} · {h.yards} yds</div>
+            </div>
+            <button onClick={() => setHoleIdx((i) => Math.min(17, i + 1))} disabled={holeIdx === 17} style={{ background: "none", border: "1px solid #3a5a44", borderRadius: 8, color: holeIdx === 17 ? "#3a5a44" : "#D9C7A0", fontSize: 16, padding: "8px 16px", fontWeight: 700 }}>›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${a.usaP.length + a.eurP.length}, 1fr)`, gap: 8, padding: "14px 12px" }}>
+            {a.usaP.map((p, i) => (
+              <BigScoreCell key={`u${i}`} name={p.name.split(" ")[0]} color={TEAM_META.USA.color} gross={row.usaGross[i]} strokes={row.usaStrokes[i]} enabled={inputsEnabled} onChange={(v) => onScore(match.id, h.hole, `usa${i}`, v)} />
             ))}
-          </tbody>
-        </table>
-      </div>
+            {a.eurP.map((p, i) => (
+              <BigScoreCell key={`e${i}`} name={p.name.split(" ")[0]} color={TEAM_META.EUR.color} gross={row.eurGross[i]} strokes={row.eurStrokes[i]} enabled={inputsEnabled} onChange={(v) => onScore(match.id, h.hole, `eur${i}`, v)} />
+            ))}
+          </div>
+          {banner ? (
+            <div>
+              <div style={{ background: banner.bg, padding: "12px 10px", textAlign: "center", fontSize: 15, fontWeight: 700, color: banner.color, letterSpacing: 0.5 }}>{banner.text}</div>
+              {row.concede && inputsEnabled && (
+                <button onClick={() => onConcede(match.id, h.hole, row.concede)} style={{ width: "100%", background: "none", border: "none", borderTop: "1px solid #2a4636", color: "#8a9a8f", fontSize: 12, padding: "10px" }}>undo concede</button>
+              )}
+            </div>
+          ) : inputsEnabled ? (
+            <div style={{ display: "flex", gap: 10, padding: "0 12px 14px" }}>
+              <button onClick={() => onConcede(match.id, h.hole, "usa")} style={{ flex: 1, background: "none", border: "1px solid #7a3844", borderRadius: 10, color: "#e8a5ae", fontSize: 14, fontWeight: 700, padding: "13px 4px" }}>{TEAM_META.USA.flag} USA concede</button>
+              <button onClick={() => onConcede(match.id, h.hole, "eur")} style={{ flex: 1, background: "none", border: "1px solid #3a5a7a", borderRadius: 10, color: "#9fc0e8", fontSize: 14, fontWeight: 700, padding: "13px 4px" }}>{TEAM_META.EUR.flag} EUR concede</button>
+            </div>
+          ) : (
+            <div style={{ padding: "10px 12px 14px", textAlign: "center", fontSize: 12, color: "#6b7a70" }}>Not played yet</div>
+          )}
+        </div>
+      )}
+
+      {mode === "card" && (
+        <div style={{ border: "1px solid #2a4636", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ fontSize: 11 }}>
+              <thead>
+                <tr style={{ color: "#6b7a70" }}>
+                  <th style={thStyle}>H</th><th style={thStyle}>Par</th>
+                  {a.usaP.map((p, i) => <th key={`u${i}`} style={{ ...thStyle, color: TEAM_META.USA.color }}>{p.name.split(" ")[0]}</th>)}
+                  {a.eurP.map((p, i) => <th key={`e${i}`} style={{ ...thStyle, color: TEAM_META.EUR.color }}>{p.name.split(" ")[0]}</th>)}
+                  <th style={thStyle}>Won by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {a.holeRows.map((r) => (
+                  <tr key={r.hole.hole} style={{ borderTop: "1px solid #2a463655", background: r.winner ? `${r.winner === "usa" ? TEAM_META.USA.color : r.winner === "eur" ? TEAM_META.EUR.color : "#C7A252"}18` : "transparent" }}>
+                    <td style={tdStyle}>{r.hole.hole}</td>
+                    <td style={{ ...tdStyle, color: "#6b7a70" }}>{r.hole.par}</td>
+                    {a.usaP.map((p, i) => <td key={`u${i}`} style={tdStyle}>{r.concede === "usa" ? "×" : (r.usaGross[i] ?? "–")}{r.usaStrokes[i] > 0 && r.usaGross[i] != null && r.concede !== "usa" ? <span style={{ color: "#C7A252", fontSize: 9 }}> {"●".repeat(r.usaStrokes[i])}</span> : null}</td>)}
+                    {a.eurP.map((p, i) => <td key={`e${i}`} style={tdStyle}>{r.concede === "eur" ? "×" : (r.eurGross[i] ?? "–")}{r.eurStrokes[i] > 0 && r.eurGross[i] != null && r.concede !== "eur" ? <span style={{ color: "#C7A252", fontSize: 9 }}> {"●".repeat(r.eurStrokes[i])}</span> : null}</td>)}
+                    <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11 }}>
+                      {r.winner === "usa" ? <span style={{ color: TEAM_META.USA.color }}>USA{r.concede ? " (c)" : ""}</span>
+                        : r.winner === "eur" ? <span style={{ color: TEAM_META.EUR.color }}>EUR{r.concede ? " (c)" : ""}</span>
+                        : r.winner === "halved" ? <span style={{ color: "#C7A252" }}>½</span> : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ padding: "8px 12px", borderTop: "1px solid #2a4636", fontSize: 10, color: "#6b7a70" }}>× = conceded · ● = shot received · ½ = halved · gross scores shown</div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ScoreCell({ gross, strokes, enabled, onChange }) {
+function BigScoreCell({ name, color, gross, strokes, enabled, onChange }) {
   const net = gross != null && gross !== "" ? gross - strokes : null;
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 4 }}>{name}</div>
       {enabled ? (
-        <input type="number" value={gross ?? ""} onChange={(e) => onChange(e.target.value)} style={inputStyle({ width: 34, padding: "3px 2px", fontSize: 12, textAlign: "center" })} />
+        <input type="number" inputMode="numeric" value={gross ?? ""} onChange={(e) => onChange(e.target.value)} style={inputStyle({ width: "100%", padding: "12px 2px", fontSize: 18, textAlign: "center", fontWeight: 700 })} />
       ) : (
-        <span>{gross ?? "–"}</span>
+        <div style={{ padding: "12px 2px", fontSize: 18, fontWeight: 700, color: gross != null ? "#F3EDDD" : "#6b7a70", border: "1px solid #2a4636", borderRadius: 6 }}>{gross ?? "–"}</div>
       )}
-      {strokes > 0 && (
-        <div style={{ fontSize: 8, color: "#C7A252", lineHeight: 1 }} title={`${strokes} stroke${strokes > 1 ? "s" : ""} given here`}>
-          {"●".repeat(strokes)}
-        </div>
-      )}
-      {net != null && strokes > 0 && (
-        <div style={{ fontSize: 8, color: "#8a9a8f", lineHeight: 1 }}>net {net}</div>
-      )}
+      <div style={{ fontSize: 11, color: "#C7A252", marginTop: 4, minHeight: 14 }}>
+        {strokes > 0 && "●".repeat(strokes)}{strokes > 0 && net != null && <span style={{ color: "#8a9a8f" }}> net {net}</span>}
+      </div>
     </div>
   );
 }
