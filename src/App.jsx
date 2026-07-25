@@ -129,6 +129,7 @@ function enrichMatch(m, state) {
     const hs = m.scores[h.hole] || {};
     if (hs.concede === "usa") { holesPlayed++; diff--; return; }
     if (hs.concede === "eur") { holesPlayed++; diff++; return; }
+    if (hs.concede === "half") { holesPlayed++; return; }
     const usaGross = usaP.map((p, i) => hs[`usa${i}`]);
     const eurGross = eurP.map((p, i) => hs[`eur${i}`]);
     const usaComplete = usaGross.every((g) => g != null && g !== "");
@@ -208,6 +209,7 @@ function computeNewEvents(match, state, existingKeys) {
       let winner = null;
       if (hs.concede === "usa") winner = "eur";
       else if (hs.concede === "eur") winner = "usa";
+      else if (hs.concede === "half") winner = "halved";
       else if (usaComplete && eurComplete) {
         const usaNet = Math.min(...usaGross.map((g, i) => g - strokesOnHole(usaRel[i], h.si)));
         const eurNet = Math.min(...eurGross.map((g, i) => g - strokesOnHole(eurRel[i], h.si)));
@@ -889,6 +891,7 @@ function analyzeMatch(match, state) {
     if (eurComplete) eurNetBest = Math.min(...eurGross.map((g, i) => g - eurStrokes[i]));
     if (hs.concede === "usa") { winner = "eur"; concede = "usa"; holesPlayed++; diff--; }
     else if (hs.concede === "eur") { winner = "usa"; concede = "eur"; holesPlayed++; diff++; }
+    else if (hs.concede === "half") { winner = "halved"; concede = "half"; holesPlayed++; }
     else if (usaNetBest != null && eurNetBest != null) {
       holesPlayed++;
       if (usaNetBest < eurNetBest) { winner = "usa"; diff++; }
@@ -950,7 +953,7 @@ function MatchView({ match, state, onScore, onConcede, onUndo, onRemove, onEdit,
 
   const banner = row.winner === "usa" ? { bg: "#5c1420", color: "#f0b3bc", text: `${TEAM_META.USA.flag} USA win the hole${row.concede ? " (conceded)" : ""}` }
     : row.winner === "eur" ? { bg: "#12324c", color: "#9fc0e8", text: `${TEAM_META.EUR.flag} Europe win the hole${row.concede ? " (conceded)" : ""}` }
-    : row.winner === "halved" ? { bg: "#3d3319", color: "#e8d5a4", text: "🤝 Halved" }
+    : row.winner === "halved" ? { bg: "#3d3319", color: "#e8d5a4", text: `🤝 Halved${row.concede === "half" ? " (agreed)" : ""}` }
     : null;
 
   return (
@@ -1007,13 +1010,14 @@ function MatchView({ match, state, onScore, onConcede, onUndo, onRemove, onEdit,
             <div>
               <div style={{ background: banner.bg, padding: "12px 10px", textAlign: "center", fontSize: 15, fontWeight: 700, color: banner.color, letterSpacing: 0.5 }}>{banner.text}</div>
               {row.concede && inputsEnabled && (
-                <button onClick={() => onConcede(match.id, h.hole, row.concede)} style={{ width: "100%", background: "none", border: "none", borderTop: "1px solid #2a4636", color: "#8a9a8f", fontSize: 12, padding: "10px" }}>undo concede</button>
+                <button onClick={() => onConcede(match.id, h.hole, row.concede)} style={{ width: "100%", background: "none", border: "none", borderTop: "1px solid #2a4636", color: "#8a9a8f", fontSize: 12, padding: "10px" }}>{row.concede === "half" ? "undo halve" : "undo concede"}</button>
               )}
             </div>
           ) : inputsEnabled ? (
-            <div style={{ display: "flex", gap: 10, padding: "0 12px 14px" }}>
-              <button onClick={() => onConcede(match.id, h.hole, "usa")} style={{ flex: 1, background: "none", border: "1px solid #7a3844", borderRadius: 10, color: "#e8a5ae", fontSize: 14, fontWeight: 700, padding: "13px 4px" }}>{TEAM_META.USA.flag} USA concede</button>
-              <button onClick={() => onConcede(match.id, h.hole, "eur")} style={{ flex: 1, background: "none", border: "1px solid #3a5a7a", borderRadius: 10, color: "#9fc0e8", fontSize: 14, fontWeight: 700, padding: "13px 4px" }}>{TEAM_META.EUR.flag} EUR concede</button>
+            <div style={{ display: "flex", gap: 8, padding: "0 12px 14px" }}>
+              <button onClick={() => onConcede(match.id, h.hole, "usa")} style={{ flex: 1, background: "none", border: "1px solid #7a3844", borderRadius: 10, color: "#e8a5ae", fontSize: 13, fontWeight: 700, padding: "13px 2px" }}>{TEAM_META.USA.flag} USA concede</button>
+              <button onClick={() => onConcede(match.id, h.hole, "half")} style={{ flex: 1, background: "none", border: "1px solid #C7A25288", borderRadius: 10, color: "#e8d5a4", fontSize: 13, fontWeight: 700, padding: "13px 2px" }}>🤝 Halve</button>
+              <button onClick={() => onConcede(match.id, h.hole, "eur")} style={{ flex: 1, background: "none", border: "1px solid #3a5a7a", borderRadius: 10, color: "#9fc0e8", fontSize: 13, fontWeight: 700, padding: "13px 2px" }}>{TEAM_META.EUR.flag} EUR concede</button>
             </div>
           ) : (
             <div style={{ padding: "10px 12px 14px", textAlign: "center", fontSize: 12, color: "#6b7a70" }}>Not played yet</div>
@@ -1043,14 +1047,14 @@ function MatchView({ match, state, onScore, onConcede, onUndo, onRemove, onEdit,
                     <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11 }}>
                       {r.winner === "usa" ? <span style={{ color: TEAM_META.USA.color }}>USA{r.concede ? " (c)" : ""}</span>
                         : r.winner === "eur" ? <span style={{ color: TEAM_META.EUR.color }}>EUR{r.concede ? " (c)" : ""}</span>
-                        : r.winner === "halved" ? <span style={{ color: "#C7A252" }}>½</span> : ""}
+                        : r.winner === "halved" ? <span style={{ color: "#C7A252" }}>½{r.concede === "half" ? " (a)" : ""}</span> : ""}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div style={{ padding: "8px 12px", borderTop: "1px solid #2a4636", fontSize: 10, color: "#6b7a70" }}>× = conceded · ● = shot received · ½ = halved · gross scores shown</div>
+          <div style={{ padding: "8px 12px", borderTop: "1px solid #2a4636", fontSize: 10, color: "#6b7a70" }}>× = conceded · ½ = halved · (a) = agreed half · ● = shot received · gross scores shown</div>
         </div>
       )}
     </div>
